@@ -148,3 +148,41 @@ func TestResponseWriterWrappersPropagateFlush(t *testing.T) {
 
 	close(release)
 }
+
+// When encryption is enabled, the server must offer HTTP/2 through ALPN.
+// http.Server.Protocols alone does not add "h2" to tls.Config.NextProtos
+// (that is done by ServeTLS, which is not used here), so a client that
+// offers h2 must actually negotiate it.
+func TestTLSNegotiatesHTTP2(t *testing.T) {
+	serverCertFpath := test.CreateTempFile(t, test.TLSCertPub)
+	serverKeyFpath := test.CreateTempFile(t, test.TLSCertKey)
+
+	cert, err := tls.LoadX509KeyPair(serverCertFpath, serverKeyFpath)
+	require.NoError(t, err)
+
+	s := &Server{
+		Address:      "127.0.0.1:0",
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		Encryption:   true,
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return &cert, nil
+		},
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}),
+		Parent: test.NilLogger,
+	}
+	err = s.Initialize()
+	require.NoError(t, err)
+	defer s.Close()
+
+	conn, err := tls.Dial("tcp", s.ln.Addr().String(), &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec
+		NextProtos:         []string{"h2", "http/1.1"},
+	})
+	require.NoError(t, err)
+	defer conn.Close() //nolint:errcheck
+
+	require.Equal(t, "h2", conn.ConnectionState().NegotiatedProtocol)
+}

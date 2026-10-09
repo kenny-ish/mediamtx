@@ -93,6 +93,9 @@ func (s *Server) Initialize() error {
 
 		tlsConfig = &tls.Config{
 			GetCertificate: getCertificate,
+			// Serve() is used instead of ServeTLS(), therefore
+			// "h2" must be added to NextProtos manually in order to negotiate HTTP/2.
+			NextProtos: []string{"h2", "http/1.1"},
 		}
 	}
 
